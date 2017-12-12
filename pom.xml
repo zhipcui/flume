@@ -27,7 +27,7 @@ limitations under the License.
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.apache.flume</groupId>
   <artifactId>flume-parent</artifactId>
-  <version>1.8.0</version>
+  <version>${artifact.version}</version>
   <packaging>pom</packaging>
 
   <name>Apache Flume</name>
@@ -46,6 +46,7 @@ limitations under the License.
     <siteUrlDeployment>file://people.apache.org/www/incubator.apache.org/flume</siteUrlDeployment>
     <stagingDirectory>${project.basedir}/target/docs</stagingDirectory>
 
+    <artifact.version>1.8.1</artifact.version>
     <activemq.version>5.7.0</activemq.version>
     <asynchbase.version>1.7.0</asynchbase.version>
     <avro.version>1.7.4</avro.version>
