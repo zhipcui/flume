@@ -30,7 +30,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
-import kafka.cluster.BrokerEndPoint;
 import kafka.utils.ZKGroupTopicDirs;
 import kafka.utils.ZkUtils;
 import org.apache.avro.io.BinaryDecoder;
@@ -66,7 +65,8 @@ import com.google.common.base.Optional;
 import scala.Option;
 
 import static org.apache.flume.source.kafka.KafkaSourceConstants.*;
-import static scala.collection.JavaConverters.asJavaListConverter;
+import static scala.collection.JavaConverters.seqAsJavaListConverter;
+
 
 /**
  * A Source for Kafka which reads messages from kafka topics.
@@ -372,24 +372,7 @@ public class KafkaSource extends AbstractPollableSource
 
     bootstrapServers = context.getString(KafkaSourceConstants.BOOTSTRAP_SERVERS);
     if (bootstrapServers == null || bootstrapServers.isEmpty()) {
-      if (zookeeperConnect == null || zookeeperConnect.isEmpty()) {
         throw new ConfigurationException("Bootstrap Servers must be specified");
-      } else {
-        // For backwards compatibility look up the bootstrap from zookeeper
-        log.warn("{} is deprecated. Please use the parameter {}",
-            KafkaSourceConstants.ZOOKEEPER_CONNECT_FLUME_KEY,
-            KafkaSourceConstants.BOOTSTRAP_SERVERS);
-
-        // Lookup configured security protocol, just in case its not default
-        String securityProtocolStr =
-            context.getSubProperties(KafkaSourceConstants.KAFKA_CONSUMER_PREFIX)
-                .get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG);
-        if (securityProtocolStr == null || securityProtocolStr.isEmpty()) {
-          securityProtocolStr = CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL;
-        }
-        bootstrapServers =
-            lookupBootstrap(zookeeperConnect, SecurityProtocol.valueOf(securityProtocolStr));
-      }
     }
 
     String groupIdProperty =
@@ -456,25 +439,6 @@ public class KafkaSource extends AbstractPollableSource
                    KafkaSourceConstants.DEFAULT_AUTO_COMMIT);
   }
 
-  /**
-   * Generates the Kafka bootstrap connection string from the metadata stored in Zookeeper.
-   * Allows for backwards compatibility of the zookeeperConnect configuration.
-   */
-  private String lookupBootstrap(String zookeeperConnect, SecurityProtocol securityProtocol) {
-    ZkUtils zkUtils = ZkUtils.apply(zookeeperConnect, ZK_SESSION_TIMEOUT, ZK_CONNECTION_TIMEOUT,
-        JaasUtils.isZkSecurityEnabled());
-    try {
-      List<BrokerEndPoint> endPoints =
-          asJavaListConverter(zkUtils.getAllBrokerEndPointsForChannel(securityProtocol)).asJava();
-      List<String> connections = new ArrayList<>();
-      for (BrokerEndPoint endPoint : endPoints) {
-        connections.add(endPoint.connectionString());
-      }
-      return StringUtils.join(connections, ',');
-    } finally {
-      zkUtils.close();
-    }
-  }
 
   @VisibleForTesting
   String getBootstrapServers() {
@@ -597,7 +561,7 @@ public class KafkaSource extends AbstractPollableSource
                                                                      String topicStr) {
     Map<TopicPartition, OffsetAndMetadata> offsets = new HashMap<>();
     ZKGroupTopicDirs topicDirs = new ZKGroupTopicDirs(groupId, topicStr);
-    List<String> partitions = asJavaListConverter(
+    List<String> partitions = seqAsJavaListConverter(
         client.getChildrenParentMayNotExist(topicDirs.consumerOffsetDir())).asJava();
     for (String partition : partitions) {
       TopicPartition key = new TopicPartition(topicStr, Integer.valueOf(partition));
