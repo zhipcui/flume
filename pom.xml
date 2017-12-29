@@ -113,6 +113,7 @@ limitations under the License.
     <xerces.version>2.9.1</xerces.version>
     <wiremock.version>1.53</wiremock.version>
     <zookeeper.version>3.4.5</zookeeper.version>
+    <cron-utils.version>7.0.0</cron-utils.version>
   </properties>
 
   <modules>
@@ -1578,6 +1579,13 @@ limitations under the License.
         <artifactId>curator-test</artifactId>
         <version>${curator.version}</version>
         <scope>test</scope>
+      </dependency>
+
+      <!-- Dependencies of the HDFS Sink -->
+      <dependency>
+        <groupId>com.cronutils</groupId>
+        <artifactId>cron-utils</artifactId>
+        <version>${cron-utils.version}</version>
       </dependency>
 
       <!-- Dependency for Hive Sink  -->

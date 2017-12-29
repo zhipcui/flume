@@ -18,6 +18,7 @@
 
 package org.apache.flume.sink.hdfs;
 
+import com.cronutils.model.time.ExecutionTime;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import org.apache.flume.Clock;
@@ -35,10 +36,12 @@ import org.apache.hadoop.io.SequenceFile.CompressionType;
 import org.apache.hadoop.io.compress.CompressionCodec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import sun.rmi.runtime.Log;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.security.PrivilegedExceptionAction;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -50,6 +53,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.time.Duration;
+import java.time.ZonedDateTime;
 
 /**
  * Internal API intended for HDFSSink use.
@@ -83,6 +88,8 @@ class BucketWriter {
   private long processSize;
 
   private FileSystem fileSystem;
+
+  private ExecutionTime rollCronExecutionTime;
 
   private volatile String filePath;
   private volatile String fileName;
@@ -171,6 +178,10 @@ class BucketWriter {
     isOpen = false;
     isUnderReplicated = false;
     this.writer.configure(context);
+  }
+
+  void setRollCronExecutionTime(ExecutionTime t) {
+    this.rollCronExecutionTime = t;
   }
 
   @VisibleForTesting
@@ -284,24 +295,38 @@ class BucketWriter {
     sinkCounter.incrementConnectionCreatedCount();
     resetCounters();
 
-    // if time-based rolling is enabled, schedule the roll
-    if (rollInterval > 0) {
-      Callable<Void> action = new Callable<Void>() {
-        public Void call() throws Exception {
-          LOG.debug("Rolling file ({}): Roll scheduled after {} sec elapsed.",
-              bucketPath, rollInterval);
-          try {
-            // Roll the file and remove reference from sfWriters map.
-            close(true);
-          } catch (Throwable t) {
-            LOG.error("Unexpected error", t);
-          }
-          return null;
+      // if time-based rolling is enabled, schedule the roll
+    if (rollCronExecutionTime != null || rollInterval > 0) {
+        Callable<Void> action = new Callable<Void>() {
+            public Void call() throws Exception {
+                try {
+                    // Roll the file and remove reference from sfWriters map.
+                    close(true);
+                } catch (Throwable t) {
+                    LOG.error("Unexpected error", t);
+                }
+                return null;
+            }
+        };
+
+        if (rollCronExecutionTime != null) {
+            ZonedDateTime now = ZonedDateTime.now();
+            Optional<Duration> timeToNextExecution = rollCronExecutionTime.timeToNextExecution(now);
+
+            if(timeToNextExecution.isPresent()) {
+                long rollDelay = timeToNextExecution.get().getSeconds() + 1;
+                timedRollFuture = timedRollerPool.schedule(action, rollDelay, TimeUnit.SECONDS);
+                LOG.debug("Cron rolling file ({}): Roll scheduled after {} sec later.",
+                        bucketPath, rollDelay);
+            } else {
+                LOG.warn("Cron roll fail: can't not call next execution time");
+            }
+
+        }else {
+            timedRollFuture = timedRollerPool.schedule(action, rollInterval, TimeUnit.SECONDS);
         }
-      };
-      timedRollFuture = timedRollerPool.schedule(action, rollInterval,
-          TimeUnit.SECONDS);
     }
+
 
     isOpen = true;
   }

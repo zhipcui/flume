@@ -27,12 +27,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.Locale;
 import java.util.Map.Entry;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.time.Duration;
+import java.time.ZonedDateTime;
 
+import com.cronutils.model.CronType;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.flume.Channel;
 import org.apache.flume.Clock;
@@ -54,6 +58,14 @@ import org.apache.hadoop.io.compress.CompressionCodec;
 import org.apache.hadoop.io.compress.CompressionCodecFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.cronutils.model.time.ExecutionTime;
+import com.cronutils.builder.CronBuilder;
+import com.cronutils.model.Cron;
+import com.cronutils.descriptor.CronDescriptor;
+import com.cronutils.model.definition.CronDefinition;
+import com.cronutils.model.definition.CronDefinitionBuilder;
+import com.cronutils.model.time.ExecutionTime;
+import com.cronutils.parser.CronParser;
 
 import com.google.common.base.Preconditions;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -115,6 +127,8 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
   private String inUsePrefix;
   private String inUseSuffix;
   private TimeZone timeZone;
+  private  String rollCron;
+  private  ExecutionTime rollCronExecutionTime;
   private int maxOpenFiles;
   private ExecutorService callTimeoutPool;
   private ScheduledExecutorService timedRollerPool;
@@ -228,6 +242,27 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
           "it may remain open and will not be renamed.");
       tryCount = 1;
     }
+
+    rollCron = context.getString("hdfs.rollCron");
+
+    if (rollCron != null) {
+        try {
+            CronDefinition cronDefinition = CronDefinitionBuilder.instanceDefinitionFor(CronType.UNIX);
+            CronParser parser = new CronParser(cronDefinition);
+
+            Cron unixCron = parser.parse(rollCron);
+            unixCron.validate();
+
+            CronDescriptor descriptor = CronDescriptor.instance(Locale.SIMPLIFIED_CHINESE);
+            String description = descriptor.describe(unixCron);
+            LOG.info("roll schedule: " + description);
+
+            rollCronExecutionTime = ExecutionTime.forCron(unixCron);
+        } catch (IllegalArgumentException e) {
+            LOG.warn("roll cron value: " + rollCron + " is not valid." );
+        }
+    }
+
 
     Preconditions.checkArgument(batchSize > 0, "batchSize must be greater than 0");
     if (codecName == null) {
@@ -357,6 +392,7 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
     transaction.begin();
     try {
       Set<BucketWriter> writers = new LinkedHashSet<>();
+
       int txnEventCount = 0;
       for (txnEventCount = 0; txnEventCount < batchSize; txnEventCount++) {
         Event event = channel.take();
@@ -466,6 +502,11 @@ public class HDFSEventSink extends AbstractSink implements Configurable {
         privExecutor, sinkCounter, idleTimeout, closeCallback,
         lookupPath, callTimeout, callTimeoutPool, retryInterval,
         tryCount);
+
+    if (rollCronExecutionTime != null) {
+        bucketWriter.setRollCronExecutionTime(rollCronExecutionTime);
+    }
+
     if (mockFs != null) {
       bucketWriter.setFileSystem(mockFs);
       bucketWriter.setMockStream(mockWriter);
